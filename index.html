@@ -145,6 +145,8 @@ label.f small{font-weight:400;color:var(--muted);font-size:13px}
 .row3 label.f{font-size:12px}
 .row3 .in{padding:0 8px;font-size:15px;font-family:var(--mono)}
 .preview{min-height:64px;padding:12px 14px;border-radius:12px;background:var(--surface2);font-size:14px}
+.preview.sm{min-height:0;padding:9px 12px;font-size:13px}
+.preview:empty{display:none}
 .preview b{font-family:var(--mono);font-weight:600}
 .warnline{color:var(--warn);font-weight:600;margin-top:4px}
 
@@ -251,7 +253,7 @@ function normalize(o){
 
 /* ---------- ukládání (jen v tomto zařízení) ---------- */
 var LS='odecty_domacnosti_v1', S;
-var ui={tab:'prehled',chartMode:'usage',sel1:null,sel2:null,form:{m:null,v:''},delPending:null,delC:null,newC:{name:'',unit:'',price:true,icon:'gauge'},resetPending:false,toastT:null,dlOk:null,impMode:'merge'};
+var ui={tab:'prehled',chartMode:'usage',sel1:null,sel2:null,form:newForm(),delPending:null,delC:null,newC:{name:'',unit:'',price:true,icon:'gauge'},resetPending:false,toastT:null,dlOk:null,impMode:'merge'};
 function loadLocal(){try{var r=localStorage.getItem(LS);return r?normalize(JSON.parse(r)):null}catch(e){return null}}
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){toast('Úložiště telefonu je nedostupné, data se neuložila')}}
 function persist(){S.updatedAt=Date.now();saveLocal()}
@@ -538,8 +540,12 @@ function defaultMonth(c){
   var mx=Math.max.apply(null,c.entries.map(function(e){return e.m}));
   return Math.min(mx+1,NOW);
 }
+function newForm(){return {m:null,d:undefined,vals:{}}}
+function autoMonth(iso){var q=iso.split('-').map(Number),m=q[0]*12+q[1]-1;return q[2]<=15?m-1:m}
 function formDate(){return ui.form.d===undefined?todayIso():ui.form.d}
-function formMonth(c){if(ui.form.m==null)ui.form.m=defaultMonth(c);return ui.form.m}
+function formMonth(){if(ui.form.m!=null)return ui.form.m;var d=formDate();return /^\d{4}-\d{2}-\d{2}$/.test(d)?autoMonth(d):NOW-1}
+function fillExisting(){var m=formMonth();activeKeys().forEach(function(k){var e=S.commodities[k].entries.find(function(x){return x.m===m});if(e&&!ui.form.vals[k])ui.form.vals[k]=String(e.v).replace('.',',')})}
+function rowPreview(c,m,v,d){return String(v).trim()===''?'':previewHtml(c,m,v,d)}
 function previewHtml(c,m,vs,dt){
   var v=num(vs);
   if(vs===''||v===null)return '<span class="muted">Zadejte hodnotu a uvidíte spotřebu i cenu za měsíc.</span>';
@@ -566,16 +572,18 @@ function previewHtml(c,m,vs,dt){
   return h;
 }
 function viewWrite(){
-  var c=S.commodities[S.cur],m=formMonth(c),meter=c.mode==='meter';
-  return '<form id="f-form" class="stack" autocomplete="off"><section class="card stack">'+
-    '<label class="f" for="f-month">Měsíc<input class="in" id="f-month" type="month" value="'+toKey(m)+'" placeholder="RRRR-MM" required></label>'+
-    '<label class="f" for="f-date">Datum odečtu <small>'+(meter?'podle něj se spotřeba přepočte na celý měsíc':'kdy jste hodnotu zjistili')+'</small><input class="in" id="f-date" type="date" value="'+esc(formDate())+'"></label>'+
-    '<label class="f" for="f-val">'+(meter?'Stav měřiče na konci měsíce':'Spotřeba za měsíc')+' <small>v '+esc(c.unit)+(meter?', z displeje měřiče':', z vyúčtování nebo aplikace dodavatele')+'</small>'+
-    '<input class="in big-in" id="f-val" inputmode="decimal" placeholder="0" value="'+esc(ui.form.v)+'"></label>'+
-    '<div class="preview" id="f-prev">'+previewHtml(c,m,ui.form.v,formDate())+'</div>'+
-    '<button class="btn block" type="submit">Uložit odečet</button></section>'+
-    (validT(c).length||c.noPrice?'':'<div class="banner"><p class="small">Chybí ceník. Bez něj aplikace nespočítá ceny a vyúčtování.</p><button type="button" class="btn sm ghost" data-act="tab" data-k="nastaveni">Zadat</button></div>')+
-    '</form>';
+  var m=formMonth(),keys=activeKeys();
+  var top='<section class="card stack"><div class="row2"><label class="f" for="f-date">Datum odečtu<input class="in" id="f-date" type="date" value="'+esc(formDate())+'"></label>'+
+    '<label class="f" for="f-month">Za měsíc<input class="in" id="f-month" type="month" value="'+toKey(m)+'" placeholder="RRRR-MM" required></label></div>'+
+    '<p class="muted small" style="margin:0">Zadáte jednou a platí pro všechny energie níž. Prázdná pole se přeskočí.</p></section>';
+  var rows=keys.map(function(k){
+    var c=S.commodities[k],meter=c.mode==='meter',val=ui.form.vals[k]||'';
+    return '<section class="card stack" style="gap:10px"><label class="f" for="vin-'+k+'"><span style="display:flex;align-items:center;gap:8px;font-size:16px">'+kic(k)+esc(c.name)+'</span>'+
+      '<small>'+(meter?'Stav měřiče na konci měsíce':'Spotřeba za měsíc')+', v '+esc(c.unit)+'</small>'+
+      '<input class="in big-in vin" id="vin-'+k+'" data-vin="'+k+'" inputmode="decimal" placeholder="0" value="'+esc(val)+'"></label>'+
+      '<div class="preview sm" id="pv-'+k+'">'+rowPreview(c,m,val,formDate())+'</div></section>';
+  }).join('');
+  return '<form id="f-form" class="stack" autocomplete="off">'+top+rows+'<button class="btn block" type="submit">Uložit vše</button></form>';
 }
 function subLine(c,e,cost,meter){var a=[];if(e.d)a.push('odečet '+fmtD(e.d));if(meter)a.push('stav '+fmt(e.v,e.v%1?1:0)+' '+c.unit);if(cost!=null)a.push(kc(cost));else if(!meter&&!c.noPrice)a.push('bez ceníku');return esc(a.join(' · '))}
 function viewHistory(){
@@ -652,20 +660,26 @@ function render(){
   var body=ui.tab==='prehled'?viewOverview():ui.tab==='zapsat'?viewWrite():ui.tab==='historie'?viewHistory():viewSettings();
   var tabs='<nav class="tabs" aria-label="Hlavní navigace"><div>'+['prehled','zapsat','historie','nastaveni'].map(function(t){
     return '<button class="tab" data-act="tab" data-k="'+t+'"'+(ui.tab===t?' aria-current="page"':'')+'>'+ic(t)+TITLES[t]+'</button>'}).join('')+'</div></nav>';
-  app.innerHTML=head+(ui.tab==='nastaveni'?'':chipsHtml())+body+tabs;
+  app.innerHTML=head+(ui.tab==='nastaveni'||ui.tab==='zapsat'?'':chipsHtml())+body+tabs;
 }
 function toast(msg){var t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(ui.toastT);ui.toastT=setTimeout(function(){t.classList.remove('on')},2400)}
 function go(tab){ui.tab=tab;ui.delPending=null;ui.resetPending=false;render();window.scrollTo(0,0)}
 
 /* ---------- akce ---------- */
 function saveEntry(){
-  var c=S.commodities[S.cur],m=formMonth(c),v=num(ui.form.v);
-  if(v===null||isNaN(v)||v<0){toast('Zadejte hodnotu');var el=$('#f-val');if(el)el.focus();return}
-  var had=c.entries.some(function(e){return e.m===m});
-  c.entries=c.entries.filter(function(e){return e.m!==m});c.entries.push({id:uid(),m:m,v:v,t:Date.now(),d:formDate()||undefined});
-  c.entries.sort(function(a,b){return a.m-b.m});
-  persist();ui.form={m:null,v:''};ui.sel1=null;ui.sel2=null;
-  go('prehled');toast(had?'Odečet přepsán':'Odečet uložen');
+  var m=formMonth(),d=formDate()||undefined,keys=activeKeys(),saved=[],bad=null;
+  keys.forEach(function(k){var raw=ui.form.vals[k];if(raw==null||String(raw).trim()==='')return;var v=num(raw);if(v===null||isNaN(v)||v<0)bad=bad||k});
+  if(bad){toast('Zkontrolujte hodnotu: '+S.commodities[bad].name);var f0=document.querySelector('[data-vin="'+bad+'"]');if(f0)f0.focus();return}
+  keys.forEach(function(k){
+    var raw=ui.form.vals[k];if(raw==null||String(raw).trim()==='')return;
+    var v=num(raw),c=S.commodities[k];
+    c.entries=c.entries.filter(function(e){return e.m!==m});
+    c.entries.push({id:uid(),m:m,v:v,t:Date.now(),d:d});
+    c.entries.sort(function(a,b){return a.m-b.m});
+    saved.push(c.name);
+  });
+  if(!saved.length){toast('Zadejte aspoň jednu hodnotu');return}
+  persist();ui.form=newForm();ui.sel1=null;ui.sel2=null;go('prehled');toast('Uloženo: '+saved.join(', '));
 }
 function download(name,data,okMsg){
   var isJson=/\.json$/.test(name),type=isJson?'application/json':'text/calendar';
@@ -685,13 +699,13 @@ app.addEventListener('click',function(e){
   var el=e.target.closest('[data-act]');if(!el)return;
   var a=el.dataset.act,k=el.dataset.k,c;
   if(a==='tab'){if(el.dataset.cur)S.cur=el.dataset.cur;go(k);if(k==='zapsat'&&!el.dataset.cur){/* zachovat */}return}
-  if(a==='cur'){S.cur=k;ui.form={m:null,v:''};ui.sel1=null;ui.sel2=null;ui.delPending=null;render();return}
+  if(a==='cur'){S.cur=k;ui.form=newForm();ui.sel1=null;ui.sel2=null;ui.delPending=null;render();return}
   if(a==='mode1'){ui.chartMode=k;render();return}
   if(a==='hit1'||a==='hit2'){pick(a,Number(el.dataset.i));return}
   if(a==='democlear'){
     S.demo=false;['elec','gas','water'].forEach(function(x){S.commodities[x].entries=[];S.commodities[x].tariffs=[]});
     S.commodities.gas.on=false;S.commodities.water.on=false;S.cur='elec';persist();ui.sel1=ui.sel2=null;render();toast('Hotovo, začněte prvním měsícem');return}
-  if(a==='edit'){c=S.commodities[S.cur];var en=c.entries.find(function(x){return x.id===el.dataset.id});if(en){ui.form={m:en.m,v:String(en.v).replace('.',','),d:en.d||''};go('zapsat')}return}
+  if(a==='edit'){c=S.commodities[S.cur];var en=c.entries.find(function(x){return x.id===el.dataset.id});if(en){ui.form={m:en.m,d:en.d||'',vals:{}};fillExisting();go('zapsat')}return}
   if(a==='del'){
     if(ui.delPending===el.dataset.id){c=S.commodities[S.cur];c.entries=c.entries.filter(function(x){return x.id!==el.dataset.id});ui.delPending=null;persist();render();toast('Zápis smazán')}
     else{ui.delPending=el.dataset.id;render()}
@@ -708,7 +722,7 @@ app.addEventListener('click',function(e){
     if(!un){toast('Zadejte jednotku');return}
     var key='c_'+uid(),nc=blankC(nm,un,true);
     nc.noPrice=!ui.newC.price;nc.icon=ui.newC.icon||'gauge';nc.col='x'+(Object.keys(S.commodities).filter(isCustom).length%4+1);
-    S.commodities[key]=nc;S.cur=key;ui.newC={name:'',unit:'',price:true,icon:'gauge'};ui.form={m:null,v:''};ui.sel1=ui.sel2=null;
+    S.commodities[key]=nc;S.cur=key;ui.newC={name:'',unit:'',price:true,icon:'gauge'};ui.form=newForm();ui.sel1=ui.sel2=null;
     persist();render();toast('Přidáno: '+nm);return}
   if(a==='delc'){
     var dk=el.dataset.c;
@@ -718,7 +732,7 @@ app.addEventListener('click',function(e){
   if(a==='import'){ui.impMode=k;var inp=$('#imp');inp.value='';inp.click();return}
   if(a==='export'){download('odecty-zaloha.json',JSON.stringify(S,null,1),'Záloha uložena');return}
   if(a==='reset'){
-    if(ui.resetPending){S=blank();S.updatedAt=Date.now();persist();ui.resetPending=false;ui.sel1=ui.sel2=null;ui.form={m:null,v:''};render();toast('Vše smazáno')}
+    if(ui.resetPending){S=blank();S.updatedAt=Date.now();persist();ui.resetPending=false;ui.sel1=ui.sel2=null;ui.form=newForm();render();toast('Vše smazáno')}
     else{ui.resetPending=true;render()}
     return}
 });
@@ -738,19 +752,15 @@ app.addEventListener('mouseover',function(e){
 app.addEventListener('input',function(e){
   if(e.target.id==='nc-name'){ui.newC.name=e.target.value;return}
   if(e.target.id==='nc-unit'){ui.newC.unit=e.target.value;return}
-  if(e.target.id==='f-val'){
-    ui.form.v=e.target.value;var c=S.commodities[S.cur];
-    $('#f-prev').innerHTML=previewHtml(c,formMonth(c),ui.form.v,formDate());
+  if(e.target.dataset&&e.target.dataset.vin){
+    var kk=e.target.dataset.vin;ui.form.vals[kk]=e.target.value;
+    $('#pv-'+kk).innerHTML=rowPreview(S.commodities[kk],formMonth(),e.target.value,formDate());
   }
 });
 app.addEventListener('change',function(e){
   var t=e.target,c;
-  if(t.id==='f-date'){ui.form.d=t.value;var cc=S.commodities[S.cur];$('#f-prev').innerHTML=previewHtml(cc,formMonth(cc),ui.form.v,formDate());return}
-  if(t.id==='f-month'){
-    if(/^\d{4}-\d{2}$/.test(t.value)){c=S.commodities[S.cur];ui.form.m=fromKey(t.value);
-      var ex=c.entries.find(function(x){return x.m===ui.form.m});if(ex&&ui.form.v==='')ui.form.v=String(ex.v).replace('.',',');
-      render()}
-    return}
+  if(t.id==='f-date'){ui.form.d=t.value;fillExisting();render();return}
+  if(t.id==='f-month'){if(/^\d{4}-\d{2}$/.test(t.value)){ui.form.m=fromKey(t.value);fillExisting();render()}return}
   if(t.id==='nc-price'){ui.newC.price=t.checked;return}
   if(t.id==='imp'){
     var f=t.files&&t.files[0];if(!f)return;var r=new FileReader();
